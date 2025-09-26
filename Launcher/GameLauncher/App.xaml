@@ -9,5 +9,7 @@
         <converters:StringToVisibilityConverter x:Key="StringToVisibilityConverter"/>
         <converters:NullToVisibilityConverter x:Key="NullToVisibilityConverter"/>
         <converters:CountToVisibilityConverter x:Key="CountToVisibilityConverter"/>
+        <converters:PageToVisibilityConverter x:Key="LibraryPageVisibility" Page="Library"/>
+        <converters:PageToVisibilityConverter x:Key="StorePageVisibility" Page="Store"/>
     </Application.Resources>
 </Application>

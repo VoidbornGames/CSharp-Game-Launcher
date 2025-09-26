@@ -10,6 +10,7 @@ namespace GameLauncher.Models
         private string _title = string.Empty;
         private string _description = string.Empty;
         private string _version = "1.0.0";
+        private string _publisher = "Publisher";
         private string _installPath = string.Empty;
         private string _executablePath = string.Empty;
         private string _imageUrl = string.Empty;
@@ -38,6 +39,12 @@ namespace GameLauncher.Models
         {
             get => _version;
             set => SetProperty(ref _version, value);
+        }
+
+        public string Publisher
+        {
+            get => _publisher;
+            set => SetProperty(ref _publisher, value);
         }
 
         public string InstallPath

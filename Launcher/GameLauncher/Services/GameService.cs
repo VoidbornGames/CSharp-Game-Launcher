@@ -1,12 +1,13 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.IO.Compression;
-using System.Net.Http;
-using System.Threading.Tasks;
-using System.Diagnostics;
 using GameLauncher.Models;
 using Newtonsoft.Json;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Net;
+using System.Net.Http;
+using System.Threading.Tasks;
+using System.Windows;
 
 namespace GameLauncher.Services
 {
@@ -15,77 +16,100 @@ namespace GameLauncher.Services
         private readonly HttpClient _httpClient;
         private readonly string _gamesDirectory;
         private readonly string _configPath;
+        private readonly string _rootPath;
+        private readonly string _version = "1.0.0";
 
         public GameService()
         {
             _httpClient = new HttpClient();
-            _gamesDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "GameLauncher", "Games");
-            _configPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "GameLauncher", "config.json");
+            _gamesDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Games");
+            _configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.data");
+            _rootPath = Path.GetPathRoot(_gamesDirectory);
             
             Directory.CreateDirectory(_gamesDirectory);
             Directory.CreateDirectory(Path.GetDirectoryName(_configPath)!);
+
+            AfterInit();
+        }
+
+        public async void AfterInit()
+        {
+            otw otw = new otw();
+            if (File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "otw.data")))
+            {
+                otw = JsonConvert.DeserializeObject<otw>(File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "otw.data")));
+                try
+                {
+                    if(await IsInternetAvailableAsync())
+                    {
+                        TrackDownload("First Use");
+                    }
+                }
+                catch { }
+            }
+
+            if (otw.haveBeenShown == false)
+            {
+                otw.haveBeenShown = true;
+                SendLicenseMessage(otw.haveBeenShown, _version);
+            }
         }
 
         public async Task<List<Game>> GetAvailableGamesAsync()
         {
+            // Check for launcher new updates
+            /*(await IsInternetAvailableAsync())
+            {
+                string versionURL = @"https://drive.usercontent.google.com/download?id=1Nqk4XcwLiXkscQTpOb62O0hr8mtr1f5g&export=download";
+
+                // Geting the launcher's online version
+                string version = await _httpClient.GetStringAsync(versionURL);
+
+                otw otw = new otw();
+                if (File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "otw.data")))
+                {
+                    otw = JsonConvert.DeserializeObject<otw>(File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "otw.data")));
+                    if (otw.version != _version)
+                        MessageBox.Show("There is a new version available! do you want to install it?"
+                            , "New Update", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                }
+            }*/
+
             // In a real implementation, this would fetch from a server
             // For demo purposes, return sample games
-            return new List<Game>
+            if(await IsInternetAvailableAsync())
             {
-                new Game
-                {
-                    Id = 1,
-                    Title = "Adventure Quest",
-                    Description = "An epic adventure game with stunning graphics and immersive gameplay.",
-                    Version = "1.2.3",
-                    SizeInBytes = 2147483648, // 2GB
-                    ImageUrl = "https://images.pexels.com/photos/442576/pexels-photo-442576.jpeg",
-                    DownloadUrl = "https://example.com/games/adventure-quest.zip",
-                    ReleaseDate = DateTime.Now.AddMonths(-6),
-                    Tags = new List<string> { "Adventure", "RPG", "Single Player" },
-                    DLCs = new List<DLC>
-                    {
-                        new DLC
-                        {
-                            Id = 1,
-                            GameId = 1,
-                            Name = "Dragon Expansion",
-                            Description = "Add dragons and new quests to your adventure!",
-                            SizeInBytes = 524288000, // 500MB
-                            Price = 9.99m,
-                            DownloadUrl = "https://example.com/dlc/dragon-expansion.zip"
-                        }
-                    }
-                },
-                new Game
-                {
-                    Id = 2,
-                    Title = "Space Explorer",
-                    Description = "Explore the vast universe in this space simulation game.",
-                    Version = "2.1.0",
-                    SizeInBytes = 3221225472, // 3GB
-                    ImageUrl = "https://images.pexels.com/photos/586063/pexels-photo-586063.jpeg",
-                    DownloadUrl = "https://example.com/games/space-explorer.zip",
-                    ReleaseDate = DateTime.Now.AddMonths(-3),
-                    Tags = new List<string> { "Simulation", "Space", "Multiplayer" }
-                },
-                new Game
-                {
-                    Id = 3,
-                    Title = "Racing Championship",
-                    Description = "High-speed racing action with realistic physics.",
-                    Version = "1.0.5",
-                    SizeInBytes = 1610612736, // 1.5GB
-                    ImageUrl = "https://images.pexels.com/photos/358070/pexels-photo-358070.jpeg",
-                    DownloadUrl = "https://example.com/games/racing-championship.zip",
-                    ReleaseDate = DateTime.Now.AddMonths(-1),
-                    Tags = new List<string> { "Racing", "Sports", "Multiplayer" }
-                }
-            };
+                string configURL = @"https://drive.usercontent.google.com/download?id=1Nqk4XcwLiXkscQTpOb62O0hr8mtr1f5g&export=download";
+
+                // Geting the config data
+                string data = await _httpClient.GetStringAsync(configURL);
+
+                // Checking if the data is valid
+                if (data != null)
+                    return JsonConvert.DeserializeObject<List<Game>>(data);
+                else
+                    return await LoadInstalledGamesAsync();
+            }
+            else
+                return await LoadInstalledGamesAsync();
         }
 
         public async Task<bool> DownloadGameAsync(Game game, IProgress<double> progress)
         {
+            foreach (DriveInfo drive in DriveInfo.GetDrives())
+            {
+                if (await IsDriveDontHaveEnoughSpace(_rootPath, game, drive))
+                {
+                    game.IsDownloading = false;
+                    game.Status = GameStatus.Error;
+
+                    MessageBox.Show("You need at least " + (game.SizeInBytes * 2.3) / 1048576 + "MB free space",
+                        "Not enough space!", MessageBoxButton.OK, MessageBoxImage.Warning);
+
+                    return false;
+                }
+            }
+
             try
             {
                 game.IsDownloading = true;
@@ -119,12 +143,17 @@ namespace GameLauncher.Services
                 game.Status = GameStatus.Installed;
 
                 await SaveGameConfigAsync(game);
+                TrackDownload(game.Title);
                 return true;
             }
             catch (Exception ex)
             {
                 game.IsDownloading = false;
                 game.Status = GameStatus.Error;
+
+                MessageBox.Show(ex.Message, "Something went wrong!",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+
                 // Log error
                 return false;
             }
@@ -132,6 +161,20 @@ namespace GameLauncher.Services
 
         public async Task<bool> UpdateGameAsync(Game game, IProgress<double> progress)
         {
+            foreach (DriveInfo drive in DriveInfo.GetDrives())
+            {
+                if (await IsDriveDontHaveEnoughSpace(_rootPath, game, drive))
+                {
+                    game.IsDownloading = false;
+                    game.Status = GameStatus.Error;
+
+                    MessageBox.Show("You need at least " + (game.SizeInBytes * 2.3) / 1048576 + "MB free space",
+                        "Not enough space!", MessageBoxButton.OK, MessageBoxImage.Warning);
+
+                    return false;
+                }
+            }
+
             try
             {
                 game.IsUpdating = true;
@@ -171,7 +214,7 @@ namespace GameLauncher.Services
                 game.Status = GameStatus.Running;
 
                 // In a real implementation, launch the actual game executable
-                // Process.Start(game.ExecutablePath);
+                Process.Start(game.ExecutablePath);
 
                 // For demo purposes, simulate game running
                 await Task.Delay(2000);
@@ -179,9 +222,13 @@ namespace GameLauncher.Services
 
                 return true;
             }
-            catch
+            catch(Exception ex)
             {
                 game.Status = GameStatus.Error;
+
+                MessageBox.Show(ex.Message, "Something went wrong!",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+
                 return false;
             }
         }
@@ -203,14 +250,31 @@ namespace GameLauncher.Services
                 await RemoveGameConfigAsync(game);
                 return true;
             }
-            catch
+            catch(Exception ex)
             {
+                MessageBox.Show(ex.Message, "Something went wrong!",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+
                 return false;
             }
         }
 
         public async Task<bool> DownloadDLCAsync(DLC dlc, IProgress<double> progress)
         {
+            foreach (DriveInfo drive in DriveInfo.GetDrives())
+            {
+                if (drive.Name == _rootPath && drive.AvailableFreeSpace < (dlc.SizeInBytes * 2.3))
+                {
+                    dlc.IsDownloading = false;
+
+                    MessageBox.Show("You need at least " + (dlc.SizeInBytes * 2.3) / 1048576 + "MB free space",
+                        "Not enough space!", MessageBoxButton.OK, MessageBoxImage.Error);
+
+                    // Log error
+                    return false;
+                }
+            }
+
             try
             {
                 dlc.IsDownloading = true;
@@ -228,9 +292,13 @@ namespace GameLauncher.Services
 
                 return true;
             }
-            catch
+            catch(Exception ex)
             {
                 dlc.IsDownloading = false;
+
+                MessageBox.Show(ex.Message, "Something went wrong!",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+
                 return false;
             }
         }
@@ -252,9 +320,10 @@ namespace GameLauncher.Services
                 var json = JsonConvert.SerializeObject(installedGames, Formatting.Indented);
                 await File.WriteAllTextAsync(_configPath, json);
             }
-            catch
+            catch(Exception ex)
             {
-                // Handle error
+                MessageBox.Show(ex.Message, "Something went wrong!",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -268,9 +337,10 @@ namespace GameLauncher.Services
                 var json = JsonConvert.SerializeObject(installedGames, Formatting.Indented);
                 await File.WriteAllTextAsync(_configPath, json);
             }
-            catch
+            catch(Exception ex)
             {
-                // Handle error
+                MessageBox.Show(ex.Message, "Something went wrong!",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -303,6 +373,78 @@ namespace GameLauncher.Services
         public void Dispose()
         {
             _httpClient?.Dispose();
+        }
+
+        public static async Task<bool> IsInternetAvailableAsync()
+        {
+            try
+            {
+                using var client = new HttpClient();
+                client.Timeout = TimeSpan.FromSeconds(3); // Don't wait too long
+                                                          // Use a lightweight, reliable endpoint (e.g., Google)
+                var response = await client.GetAsync("http://www.google.com/generate_204");
+                return response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NoContent;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static async Task<bool> IsDriveDontHaveEnoughSpace(string _rootPath, Game game, DriveInfo drive)
+        {
+            try
+            {
+                if (drive.Name == _rootPath && drive.AvailableFreeSpace < (game.SizeInBytes * 2.3))
+                {
+                    return true;
+                }
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static void SendLicenseMessage(bool haveBeenShown, string version)
+        {
+            otw otw = new otw();
+
+            otw.haveBeenShown = haveBeenShown;
+            otw.version = version;
+
+            string json = JsonConvert.SerializeObject(otw);
+            File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "otw.data"), json);
+
+            MessageBox.Show
+                ("Were not responsible for any game that is not published by Voidborn Games Take it at your own risk.",
+                "Please Be Aware!",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
+        public async void TrackDownload(string gameName)
+        {
+            string url = "https://script.google.com/macros/s/AKfycbzAOPX7lUT8roa8FktiXZbe_fBT6X10WTK5SCtBhDM11FyPys_oWkGjnqc7yBZIO76m/exec";
+            string requestUrl = $"{url}?game_name={Uri.EscapeDataString(gameName)}";
+
+            using (HttpClient client = new HttpClient())
+            {
+                try
+                {
+                    await client.GetAsync(requestUrl);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
+        struct otw
+        {
+            public bool haveBeenShown;
+            public string version;
         }
     }
 }
