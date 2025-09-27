@@ -58,31 +58,38 @@
     <DockPanel>
         <!-- SIDEBAR -->
         <StackPanel Width="200"
-                    Background="#FF2D2D30"
-                    DockPanel.Dock="Left"
-                    VerticalAlignment="Stretch"
-                    Margin="10">
+            Background="#FF2D2D30"
+            DockPanel.Dock="Left"
+            VerticalAlignment="Stretch"
+            Margin="10">
             <TextBlock Text="🎮 VOIDBORN"
-                       FontSize="20"
-                       FontWeight="Bold"
-                       Foreground="White"
-                       Margin="0,20,0,30"
-                       HorizontalAlignment="Center"/>
+               FontSize="20"
+               FontWeight="Bold"
+               Foreground="White"
+               Margin="0,20,0,30"
+               HorizontalAlignment="Center"/>
 
             <!-- Navigation Buttons -->
             <Button Content="Library" Style="{StaticResource SidebarButtonStyle}" Command="{Binding ShowLibraryCommand}" />
             <Button Content="Store" Style="{StaticResource SidebarButtonStyle}" Command="{Binding ShowStoreCommand}" />
-            <Button Content="Downloads" Style="{StaticResource SidebarButtonStyle}" Command="{Binding ShowDownloadsCommand}" />
+
+            <!-- Downloads button temporarily hidden -->
+            <Button Content="Downloads"
+            Style="{StaticResource SidebarButtonStyle}"
+            Command="{Binding ShowDownloadsCommand}"
+            Visibility="Collapsed" />
+
             <Button Content="Settings" Style="{StaticResource SidebarButtonStyle}" Command="{Binding ShowSettingsCommand}" />
 
             <StackPanel VerticalAlignment="Bottom" Margin="0,10,0,0">
                 <Separator Margin="0,20"/>
                 <TextBlock Text="v1.0.0"
-                           Foreground="Gray"
-                           FontSize="10"
-                           HorizontalAlignment="Center"/>
+                   Foreground="Gray"
+                   FontSize="10"
+                   HorizontalAlignment="Center"/>
             </StackPanel>
         </StackPanel>
+
 
         <!-- MAIN CONTENT -->
         <Grid Background="#FF1E1E1E">
@@ -178,32 +185,74 @@
                                         <StackPanel Grid.Row="2" Margin="15,0,15,15">
                                             <!-- Download Progress -->
                                             <ProgressBar Value="{Binding DownloadProgress}" 
-                                                         Height="4" 
-                                                         Background="#FF3F3F46" 
-                                                         Foreground="#FF007ACC" 
-                                                         Margin="0,0,0,10"
-                                                         Visibility="{Binding IsDownloading, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                 Height="4" 
+                 Background="#FF3F3F46" 
+                 Foreground="#FF007ACC" 
+                 Margin="0,0,0,10"
+                 Visibility="{Binding IsDownloading, Converter={StaticResource BooleanToVisibilityConverter}}"/>
 
-                                            <!-- Play Button -->
-                                            <Button Content="Play" 
-                                                    Background="#FF00AA00" 
-                                                    Foreground="White" 
-                                                    BorderThickness="0" 
-                                                    Padding="0,8" 
-                                                    FontWeight="Bold"
-                                                    Command="{Binding DataContext.LaunchGameCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                    CommandParameter="{Binding}"
-                                                    Visibility="{Binding IsInstalled, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <!-- Update ProgressBar -->
+                                            <ProgressBar Value="{Binding DownloadProgress}" 
+             Height="4" 
+             Background="#FF3F3F46" 
+             Foreground="#FF007ACC" 
+             Margin="0,0,0,10"
+             Visibility="{Binding IsUpdating, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+
+                                            <!-- Update Button -->
+                                            <Button Content="Update"
+        Background="#FFFFA500"
+        Foreground="White"
+        BorderThickness="0"
+        Padding="0,8"
+        FontWeight="Bold"
+        Command="{Binding DataContext.UpdateGameCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+        CommandParameter="{Binding}"
+        Visibility="{Binding IsUpdateAvailable, Converter={StaticResource BooleanToVisibilityConverter}}">
                                                 <Button.Style>
                                                     <Style TargetType="Button">
                                                         <Setter Property="Template">
                                                             <Setter.Value>
                                                                 <ControlTemplate TargetType="Button">
                                                                     <Border Background="{TemplateBinding Background}" 
-                                                                            CornerRadius="4" 
-                                                                            Padding="{TemplateBinding Padding}">
+                                CornerRadius="4" 
+                                Padding="{TemplateBinding Padding}">
                                                                         <ContentPresenter HorizontalAlignment="Center" 
-                                                                                          VerticalAlignment="Center"/>
+                                              VerticalAlignment="Center"/>
+                                                                    </Border>
+                                                                    <ControlTemplate.Triggers>
+                                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                                            <Setter Property="Background" Value="#FFFFC04D"/>
+                                                                        </Trigger>
+                                                                    </ControlTemplate.Triggers>
+                                                                </ControlTemplate>
+                                                            </Setter.Value>
+                                                        </Setter>
+                                                    </Style>
+                                                </Button.Style>
+                                            </Button>
+
+
+                                            <!-- Play Button -->
+                                            <Button Content="Play" 
+            Background="#FF00AA00" 
+            Foreground="White" 
+            BorderThickness="0" 
+            Padding="0,8" 
+            FontWeight="Bold"
+            Command="{Binding DataContext.LaunchGameCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+            CommandParameter="{Binding}"
+            Visibility="{Binding IsUpdateAvailable, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                                <Button.Style>
+                                                    <Style TargetType="Button">
+                                                        <Setter Property="Template">
+                                                            <Setter.Value>
+                                                                <ControlTemplate TargetType="Button">
+                                                                    <Border Background="{TemplateBinding Background}" 
+                                    CornerRadius="4" 
+                                    Padding="{TemplateBinding Padding}">
+                                                                        <ContentPresenter HorizontalAlignment="Center" 
+                                                  VerticalAlignment="Center"/>
                                                                     </Border>
                                                                     <ControlTemplate.Triggers>
                                                                         <Trigger Property="IsMouseOver" Value="True">
@@ -372,15 +421,48 @@
                            HorizontalAlignment="Center"
                            VerticalAlignment="Center"/>
             </Grid>
-
             <!-- Settings Page -->
-            <Grid Visibility="{Binding CurrentPage, Converter={StaticResource SettingsPageVisibility}}">
-                <TextBlock Text="⚙️ Settings Page"
-                           FontSize="32"
-                           Foreground="White"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center"/>
+            <Grid Visibility="{Binding CurrentPage, Converter={StaticResource SettingsPageVisibility}}"
+                  Background="#222">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="300">
+
+                    <!-- Title -->
+                    <TextBlock Text="⚙️ Settings"
+                   FontSize="32"
+                   Foreground="White"
+                   HorizontalAlignment="Center"
+                   Margin="0,0,0,20"/>
+
+                    <!-- Name Label -->
+                    <TextBlock Text="Player Name:"
+                   FontSize="16"
+                   Foreground="White"
+                   Margin="0,0,0,5"/>
+
+                    <!-- Input -->
+                    <TextBox Text="{Binding PlayerName, UpdateSourceTrigger=PropertyChanged}"
+                 FontSize="16"
+                 Padding="5"
+                 Background="#333"
+                 Foreground="White"
+                 BorderBrush="Gray"
+                 BorderThickness="1"
+                 />
+
+                    <!-- Save Button -->
+                    <Button Content="Save"
+                Command="{Binding SavePlayerNameCommand}"
+                FontSize="16"
+                Padding="5"
+                Background="#444"
+                Foreground="White"
+                BorderThickness="0"
+                Margin="0,10,0,0"
+                />
+
+                </StackPanel>
             </Grid>
+
         </Grid>
     </DockPanel>
 </Window>

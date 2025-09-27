@@ -4,8 +4,14 @@ using GameLauncher.Services;
 using Microsoft.Toolkit.Mvvm.ComponentModel;
 using Microsoft.Toolkit.Mvvm.Input;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
@@ -52,11 +58,23 @@ namespace GameLauncher.ViewModels
             }
         }
 
+        private string _playerName;
+        public string PlayerName
+        {
+            get => _playerName;
+            set
+            {
+                _playerName = value;
+                OnPropertyChanged();
+            }
+        }
+
         public ICommand LaunchGameCommand { get; }
         public ICommand DownloadGameCommand { get; }
         public ICommand UpdateGameCommand { get; }
         public ICommand UninstallGameCommand { get; }
         public ICommand DownloadDLCCommand { get; }
+        public ICommand SavePlayerNameCommand { get; }
 
         public MainViewModel()
         {
@@ -80,26 +98,58 @@ namespace GameLauncher.ViewModels
             });
             ShowDownloadsCommand = new RelayCommand(() => CurrentPage = PageType.Downloads);
             ShowSettingsCommand = new RelayCommand(() => CurrentPage = PageType.Settings);
+            SavePlayerNameCommand = new RelayCommand(async () => await SavePlayerName());
 
             _ = LoadGamesAsync();
         }
 
         private async Task LoadGamesAsync()
         {
-            var games = await _gameService.GetAvailableGamesAsync();
+            List<Game> localGames = new();
+            List<Game> onlineGames = new();
+
+            if (await IsInternetAvailableAsync())
+            {
+                onlineGames = await _gameService.GetAvailableGamesAsync();
+            }
+
+            localGames = await _gameService.LoadInstalledGamesAsync();
 
             Application.Current.Dispatcher.Invoke(() =>
             {
                 AllGames.Clear();
-                AllGames.Add(new Game
+
+                foreach (var onlineGame in onlineGames)
                 {
-                    Title = "Test Game",
-                    Description = "A sample installed game",
-                    Publisher = "Voidborn",
-                    IsInstalled = true
-                });
-                foreach (var game in games)
-                    AllGames.Add(game);
+                    var localMatch = localGames.FirstOrDefault(g => g.Title == onlineGame.Title);
+
+                    if (localMatch != null)
+                    {
+                        // Check for update
+                        if (Version.TryParse(localMatch.Version, out var localVer) &&
+                            Version.TryParse(onlineGame.Version, out var onlineVer) &&
+                            onlineVer > localVer)
+                        {
+                            localMatch.IsUpdateAvailable = true;
+                            localMatch.UpdateUrl = onlineGame.UpdateUrl;
+                            localMatch.Version = onlineGame.Version; // Optional: show new version in UI
+                        }
+
+                        AllGames.Add(localMatch);
+                    }
+                    else
+                    {
+                        AllGames.Add(onlineGame);
+                    }
+                }
+
+                // Add any local-only games that aren't in online config
+                foreach (var game in localGames)
+                {
+                    if (!AllGames.Any(g => g.Title == game.Title))
+                        AllGames.Add(game);
+                }
+
                 FilterGames();
             });
         }
@@ -119,6 +169,13 @@ namespace GameLauncher.ViewModels
                     InstalledGames.Add(game);
                 else
                     StoreGames.Add(game);
+            }
+            
+            foreach(var game in InstalledGames)
+            {
+                var storeGame = StoreGames.FirstOrDefault(g => g.Title == game.Title);
+                if (storeGame != null)
+                    StoreGames.Remove(storeGame);
             }
         }
 
@@ -144,9 +201,28 @@ namespace GameLauncher.ViewModels
             if (game == null)
                 return;
 
-            var progress = new Progress<double>(p => game.DownloadProgress = p);
-            await _gameService.UpdateGameAsync(game, progress);
+            var progress = new Progress<double>(p =>
+            {
+                game.DownloadProgress = p;
+            });
+
+            game.IsUpdating = true; // Show progress bar
+            bool success = await _gameService.UpdateGameAsync(game, progress);
+            game.IsUpdating = false; // Hide progress bar when done
+            game.DownloadProgress = 0; // Reset progress bar
+
+            if (success)
+            {
+                // Mark update as done
+                game.IsUpdateAvailable = false;
+                game.IsInstalled = true;
+                game.DownloadProgress = 0;
+
+                // Launch game automatically after update
+                await LaunchGameAsync(game);
+            }
         }
+
 
         private async Task UninstallGameAsync(Game? game)
         {
@@ -170,5 +246,35 @@ namespace GameLauncher.ViewModels
             var progress = new Progress<double>(p => dlc.DownloadProgress = p);
             await _gameService.DownloadDLCAsync(dlc, progress);
         }
+        public static async Task<bool> IsInternetAvailableAsync()
+        {
+            try
+            {
+                using var client = new HttpClient();
+                client.Timeout = TimeSpan.FromSeconds(3); // Don't wait too long
+                                                          // Use a lightweight, reliable endpoint (e.g., Google)
+                var response = await client.GetAsync("http://www.google.com/generate_204");
+                return response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NoContent;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private async Task SavePlayerName()
+        {
+            foreach (var game in await _gameService.GetAvailableGamesAsync())
+                await _gameService.UpdateUserName(game.Title, PlayerName);
+
+            System.Windows.MessageBox.Show("Player name saved successfully!",
+                                           "Success",
+                                           MessageBoxButton.OK,
+                                           MessageBoxImage.Information);
+        }
+
+        public event PropertyChangedEventHandler PropertyChanged;
+        protected void OnPropertyChanged([CallerMemberName] string name = null) =>
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 }

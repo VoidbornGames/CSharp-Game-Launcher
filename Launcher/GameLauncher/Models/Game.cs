@@ -18,11 +18,18 @@ namespace GameLauncher.Models
         private bool _isInstalled;
         private bool _isDownloading;
         private bool _isUpdating;
+        private bool _isUpdateAvailable;
         private double _downloadProgress;
         private GameStatus _status = GameStatus.NotInstalled;
 
         public int Id { get; set; }
-        
+
+        public bool IsUpdateAvailable
+        {
+            get => _isUpdateAvailable;
+            set => SetProperty(ref _isUpdateAvailable, value);
+        }
+
         public string Title
         {
             get => _title;

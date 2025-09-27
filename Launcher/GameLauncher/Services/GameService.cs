@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
@@ -86,7 +87,13 @@ namespace GameLauncher.Services
 
                 // Checking if the data is valid
                 if (data != null)
-                    return JsonConvert.DeserializeObject<List<Game>>(data);
+                {
+                    var _data = JsonConvert.DeserializeObject<List<Game>>(data);
+                    if (_data != null)
+                        return _data;
+                    else
+                        return await LoadInstalledGamesAsync();
+                }
                 else
                     return await LoadInstalledGamesAsync();
             }
@@ -119,31 +126,57 @@ namespace GameLauncher.Services
                 var gameDir = Path.Combine(_gamesDirectory, SanitizeFileName(game.Title));
                 Directory.CreateDirectory(gameDir);
 
-                // Simulate download progress
-                for (int i = 0; i <= 100; i += 5)
+                // Temporary zip file path
+                var zipFilePath = Path.Combine(gameDir, $"{SanitizeFileName(game.Title)}.zip");
+
+                // Download zip file with progress
+                using (var response = await _httpClient.GetAsync(game.DownloadUrl, HttpCompletionOption.ResponseHeadersRead))
                 {
-                    await Task.Delay(200); // Simulate download time
-                    progress?.Report(i);
-                    game.DownloadProgress = i;
+                    response.EnsureSuccessStatusCode();
+
+                    var totalBytes = response.Content.Headers.ContentLength ?? -1L;
+                    var canReportProgress = totalBytes != -1 && progress != null;
+
+                    using (var stream = await response.Content.ReadAsStreamAsync())
+                    using (var fileStream = new FileStream(zipFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
+                    {
+                        var buffer = new byte[8192];
+                        long totalRead = 0;
+                        int read;
+                        while ((read = await stream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                        {
+                            await fileStream.WriteAsync(buffer, 0, read);
+                            totalRead += read;
+
+                            if (canReportProgress)
+                            {
+                                double percent = (double)totalRead / totalBytes * 100;
+                                progress.Report(percent);
+                                game.DownloadProgress = percent;
+                            }
+                        }
+                    }
                 }
 
-                // In a real implementation, you would:
-                // 1. Download the actual game files from game.DownloadUrl
-                // 2. Extract the files to the game directory
-                // 3. Set up the executable path
+                // Extract the zip file
+                ZipFile.ExtractToDirectory(zipFilePath, gameDir);
 
-                // For demo purposes, create a dummy executable
-                var exePath = Path.Combine(gameDir, $"{SanitizeFileName(game.Title)}.exe");
-                await File.WriteAllTextAsync(exePath, "Demo executable");
+                // Delete the zip file
+                File.Delete(zipFilePath);
+
+                // Find the main executable (you can improve this to detect better)
+                var exeFiles = Directory.GetFiles(gameDir, "*.exe", SearchOption.AllDirectories);
+                var mainExe = exeFiles.Length > 0 ? exeFiles[0] : null;
 
                 game.InstallPath = gameDir;
-                game.ExecutablePath = exePath;
+                game.ExecutablePath = mainExe ?? "";
                 game.IsInstalled = true;
                 game.IsDownloading = false;
                 game.Status = GameStatus.Installed;
 
                 await SaveGameConfigAsync(game);
                 TrackDownload(game.Title);
+
                 return true;
             }
             catch (Exception ex)
@@ -154,7 +187,6 @@ namespace GameLauncher.Services
                 MessageBox.Show(ex.Message, "Something went wrong!",
                     MessageBoxButton.OK, MessageBoxImage.Error);
 
-                // Log error
                 return false;
             }
         }
@@ -180,15 +212,50 @@ namespace GameLauncher.Services
                 game.IsUpdating = true;
                 game.Status = GameStatus.Updating;
 
-                // Simulate update progress
-                for (int i = 0; i <= 100; i += 10)
+                var gameDir = Path.Combine(_gamesDirectory, SanitizeFileName(game.Title));
+                Directory.CreateDirectory(gameDir);
+
+                var zipFilePath = Path.Combine(gameDir, $"{SanitizeFileName(game.Title)}_update.zip");
+
+                // Download zip file with progress
+                using (var response = await _httpClient.GetAsync(game.DownloadUrl, HttpCompletionOption.ResponseHeadersRead))
                 {
-                    await Task.Delay(150);
-                    progress?.Report(i);
-                    game.DownloadProgress = i;
+                    response.EnsureSuccessStatusCode();
+
+                    var totalBytes = response.Content.Headers.ContentLength ?? -1L;
+                    var canReportProgress = totalBytes != -1 && progress != null;
+
+                    using (var stream = await response.Content.ReadAsStreamAsync())
+                    using (var fileStream = new FileStream(zipFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
+                    {
+                        var buffer = new byte[8192];
+                        long totalRead = 0;
+                        int read;
+                        while ((read = await stream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                        {
+                            await fileStream.WriteAsync(buffer, 0, read);
+                            totalRead += read;
+
+                            if (canReportProgress)
+                            {
+                                double percent = (double)totalRead / totalBytes * 100;
+                                progress.Report(percent);
+                                game.DownloadProgress = percent;
+                            }
+                        }
+                    }
                 }
 
-                // In a real implementation, download and apply updates
+                // Extract and overwrite files
+                ZipFile.ExtractToDirectory(zipFilePath, gameDir, overwriteFiles: true);
+
+                // Delete zip
+                File.Delete(zipFilePath);
+
+                // Optionally update executable path if needed
+                var exeFiles = Directory.GetFiles(gameDir, "*.exe", SearchOption.AllDirectories);
+                game.ExecutablePath = exeFiles.Length > 0 ? exeFiles[0] : game.ExecutablePath;
+
                 game.IsUpdating = false;
                 game.Status = GameStatus.Installed;
                 game.LastUpdated = DateTime.Now;
@@ -196,13 +263,16 @@ namespace GameLauncher.Services
                 await SaveGameConfigAsync(game);
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
                 game.IsUpdating = false;
                 game.Status = GameStatus.Error;
+
+                MessageBox.Show(ex.Message, "Update failed!", MessageBoxButton.OK, MessageBoxImage.Error);
                 return false;
             }
         }
+
 
         public async Task<bool> LaunchGameAsync(Game game)
         {
@@ -316,7 +386,8 @@ namespace GameLauncher.Services
                 }
                 
                 installedGames.Add(game);
-                
+                await createUserData(installedGames);
+
                 var json = JsonConvert.SerializeObject(installedGames, Formatting.Indented);
                 await File.WriteAllTextAsync(_configPath, json);
             }
@@ -333,7 +404,8 @@ namespace GameLauncher.Services
             {
                 var installedGames = await LoadInstalledGamesAsync();
                 installedGames.RemoveAll(g => g.Id == game.Id);
-                
+                await createUserData(installedGames);
+
                 var json = JsonConvert.SerializeObject(installedGames, Formatting.Indented);
                 await File.WriteAllTextAsync(_configPath, json);
             }
@@ -352,11 +424,51 @@ namespace GameLauncher.Services
                     return new List<Game>();
 
                 var json = await File.ReadAllTextAsync(_configPath);
-                return JsonConvert.DeserializeObject<List<Game>>(json) ?? new List<Game>();
+                var gameData = JsonConvert.DeserializeObject<List<Game>>(json) ?? new List<Game>();
+                await createUserData(gameData);
+
+                return gameData;
             }
             catch
             {
                 return new List<Game>();
+            }
+        }
+
+        private async Task createUserData(List<Game> gameData)
+        {
+            foreach (var game in gameData)
+            {
+                var _userData = Path.Combine(_gamesDirectory, SanitizeFileName(game.Title), "user.data");
+                if (!File.Exists(_userData))
+                {
+                    userData jsonData = new()
+                    {
+                        username = "User",
+                        money = 0,
+                        uuid = Guid.NewGuid().ToString()
+                    };
+                    var userJson = JsonConvert.SerializeObject(jsonData, Formatting.Indented);
+                    await File.WriteAllTextAsync(_userData, userJson);
+                }
+            }
+        }
+
+        public async Task UpdateUserName(string gameTitle, string newName)
+        {
+            var userDataPath = Path.Combine(_gamesDirectory, SanitizeFileName(gameTitle), "user.data");
+            if (File.Exists(userDataPath))
+            {
+                // Load existing
+                var json = await File.ReadAllTextAsync(userDataPath);
+                var data = JsonConvert.DeserializeObject<userData>(json);
+
+                // Update
+                data.username = newName;
+
+                // Save back
+                var updatedJson = JsonConvert.SerializeObject(data, Formatting.Indented);
+                await File.WriteAllTextAsync(userDataPath, updatedJson);
             }
         }
 
@@ -445,6 +557,13 @@ namespace GameLauncher.Services
         {
             public bool haveBeenShown;
             public string version;
+        }
+
+        struct userData
+        {
+            public string username;
+            public int money;
+            public string uuid;
         }
     }
 }
