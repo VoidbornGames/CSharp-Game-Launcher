@@ -443,7 +443,7 @@ namespace GameLauncher.Services
         {
             if (!File.Exists(_userDataPath))
             {
-                var uuid = await SendRequest("5.57.34.86", 11001, "makeUUID", "");
+                var uuid = await SendRequest("8.13.52.99", 11001, "makeUUID", "");
 
                 userData jsonData = new()
                 {
@@ -455,7 +455,7 @@ namespace GameLauncher.Services
                 var userJson = JsonConvert.SerializeObject(jsonData, Formatting.Indented);
                 await File.WriteAllTextAsync(_userDataPath, userJson);
 
-                await SendRequest("5.57.34.86", 11001, "createUser", userJson);
+                await SendRequest("8.13.52.99", 11001, "createUser", userJson);
             }
         }
 
@@ -610,6 +610,7 @@ namespace GameLauncher.Services
             public string Password { get; set; } = "";
             public int Score { get; set; } = 0;
             public string Role { get; set; } = "player";
+
         }
     }
 }
