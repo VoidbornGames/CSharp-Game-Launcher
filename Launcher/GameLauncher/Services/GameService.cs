@@ -1,4 +1,4 @@
-using GameLauncher.Models;
+﻿using GameLauncher.Models;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -7,6 +7,8 @@ using System.IO;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
 
@@ -16,6 +18,7 @@ namespace GameLauncher.Services
     {
         private readonly HttpClient _httpClient;
         private readonly string _gamesDirectory;
+        private readonly string _userDataPath;
         private readonly string _configPath;
         private readonly string _rootPath;
         private readonly string _version = "1.0.0";
@@ -26,7 +29,9 @@ namespace GameLauncher.Services
             _gamesDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Games");
             _configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.data");
             _rootPath = Path.GetPathRoot(_gamesDirectory);
-            
+            _userDataPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "user.data");
+
+
             Directory.CreateDirectory(_gamesDirectory);
             Directory.CreateDirectory(Path.GetDirectoryName(_configPath)!);
 
@@ -54,6 +59,9 @@ namespace GameLauncher.Services
                 otw.haveBeenShown = true;
                 SendLicenseMessage(otw.haveBeenShown, _version);
             }
+
+            if (await IsInternetAvailableAsync())
+                await createUserData();
         }
 
         public async Task<List<Game>> GetAvailableGamesAsync()
@@ -273,7 +281,6 @@ namespace GameLauncher.Services
             }
         }
 
-
         public async Task<bool> LaunchGameAsync(Game game)
         {
             try
@@ -386,7 +393,6 @@ namespace GameLauncher.Services
                 }
                 
                 installedGames.Add(game);
-                await createUserData(installedGames);
 
                 var json = JsonConvert.SerializeObject(installedGames, Formatting.Indented);
                 await File.WriteAllTextAsync(_configPath, json);
@@ -404,7 +410,6 @@ namespace GameLauncher.Services
             {
                 var installedGames = await LoadInstalledGamesAsync();
                 installedGames.RemoveAll(g => g.Id == game.Id);
-                await createUserData(installedGames);
 
                 var json = JsonConvert.SerializeObject(installedGames, Formatting.Indented);
                 await File.WriteAllTextAsync(_configPath, json);
@@ -425,7 +430,6 @@ namespace GameLauncher.Services
 
                 var json = await File.ReadAllTextAsync(_configPath);
                 var gameData = JsonConvert.DeserializeObject<List<Game>>(json) ?? new List<Game>();
-                await createUserData(gameData);
 
                 return gameData;
             }
@@ -435,22 +439,23 @@ namespace GameLauncher.Services
             }
         }
 
-        private async Task createUserData(List<Game> gameData)
+        private async Task createUserData()
         {
-            foreach (var game in gameData)
+            if (!File.Exists(_userDataPath))
             {
-                var _userData = Path.Combine(_gamesDirectory, SanitizeFileName(game.Title), "user.data");
-                if (!File.Exists(_userData))
+                var uuid = await SendRequest("5.57.34.86", 11001, "makeUUID", "");
+
+                userData jsonData = new()
                 {
-                    userData jsonData = new()
-                    {
-                        username = "User",
-                        money = 0,
-                        uuid = Guid.NewGuid().ToString()
-                    };
-                    var userJson = JsonConvert.SerializeObject(jsonData, Formatting.Indented);
-                    await File.WriteAllTextAsync(_userData, userJson);
-                }
+                    Username = uuid,
+                    Password = uuid,
+                    Score = 0,
+                    Role = "player"
+                };
+                var userJson = JsonConvert.SerializeObject(jsonData, Formatting.Indented);
+                await File.WriteAllTextAsync(_userDataPath, userJson);
+
+                await SendRequest("5.57.34.86", 11001, "createUser", userJson);
             }
         }
 
@@ -464,7 +469,7 @@ namespace GameLauncher.Services
                 var data = JsonConvert.DeserializeObject<userData>(json);
 
                 // Update
-                data.username = newName;
+                data.Username = newName;
 
                 // Save back
                 var updatedJson = JsonConvert.SerializeObject(data, Formatting.Indented);
@@ -553,17 +558,58 @@ namespace GameLauncher.Services
             }
         }
 
+        static async Task<string> SendRequest(string serverIp, int port, string request, string inputData)
+        {
+            while (true)
+            {
+                var data = new Data { theCommand = request, jsonData = inputData };
+
+                try
+                {
+                    using TcpClient client = new TcpClient(serverIp, port);
+                    using var stream = client.GetStream();
+
+                    // Send
+                    string json = JsonConvert.SerializeObject(data);
+                    byte[] message = Encoding.UTF8.GetBytes(json);
+                    await stream.WriteAsync(message, 0, message.Length);
+
+                    // Receive
+                    byte[] buffer = new byte[4096];
+                    int read = stream.Read(buffer, 0, buffer.Length);
+                    if (read > 0)
+                    {
+                        string responseJson = Encoding.UTF8.GetString(buffer, 0, read);
+                        var response = JsonConvert.DeserializeObject<Data>(responseJson);
+                        if (response != null)
+                            return response.jsonData;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"❌ Error: {ex.Message}");
+                }
+            }
+        }
+
+        public class Data
+        {
+            public string theCommand { get; set; }
+            public string jsonData { get; set; }
+        }
+
         struct otw
         {
             public bool haveBeenShown;
             public string version;
         }
 
-        struct userData
+        public class userData
         {
-            public string username;
-            public int money;
-            public string uuid;
+            public string Username { get; set; } = "";
+            public string Password { get; set; } = "";
+            public int Score { get; set; } = 0;
+            public string Role { get; set; } = "player";
         }
     }
 }
