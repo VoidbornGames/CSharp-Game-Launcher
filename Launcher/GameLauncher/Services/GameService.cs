@@ -1,4 +1,4 @@
-﻿using GameLauncher.Models;
+using GameLauncher.Models;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -61,7 +61,7 @@ namespace GameLauncher.Services
             }
 
             if (await IsInternetAvailableAsync())
-                await createUserData();
+                _ = createUserData();
         }
 
         public async Task<List<Game>> GetAvailableGamesAsync()
@@ -443,19 +443,19 @@ namespace GameLauncher.Services
         {
             if (!File.Exists(_userDataPath))
             {
-                var uuid = await SendRequest("8.13.52.99", 11001, "makeUUID", "");
+                var uuid = JsonConvert.DeserializeObject<Guid>(await SendRequest("5.57.34.86", 11001, "makeUUID", ""));
 
                 userData jsonData = new()
                 {
-                    Username = uuid,
-                    Password = uuid,
-                    Score = 0,
+                    Username = "user",
+                    Password = "ali2020",
+                    uuid = uuid,
                     Role = "player"
                 };
                 var userJson = JsonConvert.SerializeObject(jsonData, Formatting.Indented);
                 await File.WriteAllTextAsync(_userDataPath, userJson);
 
-                await SendRequest("8.13.52.99", 11001, "createUser", userJson);
+                await SendRequest("5.57.34.86", 11001, "createUser", userJson);
             }
         }
 
@@ -558,38 +558,38 @@ namespace GameLauncher.Services
             }
         }
 
-        static async Task<string> SendRequest(string serverIp, int port, string request, string inputData)
+        private static async Task<string> SendRequest(string serverIp, int port, string request, string inputData)
         {
-            while (true)
+            var data = new Data { theCommand = request, jsonData = inputData };
+
+            try
             {
-                var data = new Data { theCommand = request, jsonData = inputData };
+                using TcpClient client = new TcpClient();
+                await client.ConnectAsync(serverIp, port);
 
-                try
+                using var stream = client.GetStream();
+                using var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
+                using var reader = new StreamReader(stream, Encoding.UTF8);
+
+                // --- Send JSON with newline (important for server's ReadLineAsync) ---
+                string json = JsonConvert.SerializeObject(data);
+                await writer.WriteLineAsync(json);
+
+                // --- Receive response ---
+                string? responseJson = await reader.ReadLineAsync();
+                if (!string.IsNullOrEmpty(responseJson))
                 {
-                    using TcpClient client = new TcpClient(serverIp, port);
-                    using var stream = client.GetStream();
-
-                    // Send
-                    string json = JsonConvert.SerializeObject(data);
-                    byte[] message = Encoding.UTF8.GetBytes(json);
-                    await stream.WriteAsync(message, 0, message.Length);
-
-                    // Receive
-                    byte[] buffer = new byte[4096];
-                    int read = stream.Read(buffer, 0, buffer.Length);
-                    if (read > 0)
-                    {
-                        string responseJson = Encoding.UTF8.GetString(buffer, 0, read);
-                        var response = JsonConvert.DeserializeObject<Data>(responseJson);
-                        if (response != null)
-                            return response.jsonData;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"❌ Error: {ex.Message}");
+                    var response = JsonConvert.DeserializeObject<Data>(responseJson);
+                    if (response != null)
+                        return response.jsonData;
                 }
             }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error: {ex.Message}");
+            }
+
+            return string.Empty;
         }
 
         public class Data
@@ -608,9 +608,8 @@ namespace GameLauncher.Services
         {
             public string Username { get; set; } = "";
             public string Password { get; set; } = "";
-            public int Score { get; set; } = 0;
+            public Guid uuid { get; set; }
             public string Role { get; set; } = "player";
-
         }
     }
 }
